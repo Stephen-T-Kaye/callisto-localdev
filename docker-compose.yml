@@ -187,6 +187,7 @@ services:
 
   timecard-restapi:
     image: "ghcr.io/stephen-t-kaye/callisto-timecard-application:$TIMECARD_RESTAPI_TAG"
+    pull_policy: ${PULL_POLICY}
     environment:
       <<: *db-env
       BOOTSTRAP_SERVER: kafka:9093
@@ -195,7 +196,7 @@ services:
       SPRING_APPLICATION_JSON: '{
         "spring.kafka.ssl.trust-store-location": "file://keystore/timecard-restapi/timecard-restapi.truststore.jks",
         "spring.kafka.ssl.trust-store-password": "changeit"
-      }'
+        }'
     ports:
       - "60100:9090"
     depends_on:
@@ -210,6 +211,39 @@ services:
       test: wget --no-verbose --tries=1 --spider http://timecard-restapi:9090/swagger-ui/index.html || exit 1
     networks:
       - callisto
+
+  accruals-schema-creation:
+    <<: *db-schema-creation
+    command: ["accruals"]
+
+  accruals-database-migrations:
+    <<: *liquibase-setting
+    image: "ghcr.io/stephen-t-kaye/callisto-accruals-database:$ACCRUALS_RESTAPI_TAG"
+    environment:
+      <<: *db-env
+    command: ["accruals"]
+    depends_on:
+      accruals-schema-creation:
+        condition: service_completed_successfully
+
+  accruals-restapi:
+    image: "ghcr.io/stephen-t-kaye/callisto-accruals-application:$ACCRUALS_RESTAPI_TAG"
+    pull_policy: ${PULL_POLICY}
+    environment:
+      <<: *db-env
+    command:
+      - "--server.port=9090" # Having to override server port as application.properties is setting it to a different port
+    ports:
+      - "60200:9090"
+    depends_on:
+      accruals-database-migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      <<: *healthcheck-settings
+      test: wget --no-verbose --tries=1 --spider http://accruals-restapi:9090/swagger-ui/index.html || exit 1
+    networks:
+      - callisto
+
 
   # person-restapi-kafka-setup:
   #   <<: *certificate-creation
@@ -250,21 +284,6 @@ services:
   #     <<: *healthcheck-settings
   #     test: ["CMD", "curl", "-f", "http://web:9090/index.html"]
 
-
-  # accruals-schema-creation:
-  #   <<: *db-schema-creation
-  #   command: ["accruals"]
-
-  # accruals-database-migrations:
-  #   <<: *liquibase-setting
-  #   image: "quay.io/ukhomeofficedigital/callisto-accruals-database:$ACCRUALS_RESTAPI_TAG"
-  #   environment:
-  #     <<: *db-env
-  #   command: ["accruals"]
-  #   depends_on:
-  #     accruals-schema-creation:
-  #       condition: service_completed_successfully
-
   # person-schema-creation:
   #   <<: *db-schema-creation
   #   command: ["person"]
@@ -278,24 +297,6 @@ services:
   #   depends_on:
   #     person-schema-creation:
   #       condition: service_completed_successfully
-
-
-  # callisto-accruals-restapi:
-  #   image: "quay.io/ukhomeofficedigital/callisto-accruals-restapi:$ACCRUALS_RESTAPI_TAG"
-  #   environment:
-  #     <<: *db-env
-  #   command:
-  #     - "--server.port=9090" # Having to override server port as application.properties is setting it to a different port
-  #   ports:
-  #     - "50200:9090"
-  #   depends_on:
-  #     accruals-database-migrations:
-  #       condition: service_completed_successfully
-  #   healthcheck:
-  #     <<: *healthcheck-settings
-  #     test: wget --no-verbose --tries=1 --spider http://callisto-accruals-restapi:9090/swagger-ui/index.html || exit 1
-  #   networks:
-  #     - callisto
 
   # callisto-person-restapi:
   #   image: "quay.io/ukhomeofficedigital/callisto-person-restapi:$PERSON_RESTAPI_TAG"
