@@ -14,5 +14,6 @@ liquibase \
 --username=${DATABASE_USERNAME} \
 --password=${DATABASE_PASSWORD} \
 --changeLogFile=changelog/db.changelog-main.yml \
+--context-filter=dev \
 --liquibaseSchemaName=${db_schema} \
 update
