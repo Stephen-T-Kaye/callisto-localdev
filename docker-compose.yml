@@ -244,15 +244,37 @@ services:
     networks:
       - callisto
 
+  balance-calculator-kafka-setup:
+    <<: *certificate-creation
+    command: ["balance-calculator"]
+
+  balance-calculator:
+    image: "ghcr.io/stephen-t-kaye/callisto-balance-calculator-application:$BALANCE_CALCULATOR_TAG"
+    environment:
+      BOOTSTRAP_SERVER: kafka:9093
+      KEYSTORE_LOCATION: file://keystore/balance-calculator/balance-calculator.keystore.jks
+      KEYSTORE_PASSWORD: changeit
+      ACCRUALS_URL: http://accruals-restapi:9090
+      SPRING_APPLICATION_JSON: '{
+        "spring.kafka.ssl.trust-store-location": "file://keystore/balance-calculator/balance-calculator.truststore.jks",
+        "spring.kafka.ssl.trust-store-password": "changeit"
+        }'
+    ports:
+      - "60410:9090"
+    depends_on:
+      balance-calculator-kafka-setup:
+        condition: service_completed_successfully
+    volumes:
+      - keystore:/keystore
+    healthcheck:
+      <<: *healthcheck-settings
+      test: wget --no-verbose --tries=1 --spider http://balance-calculator:9090/actuator/health || exit 1
+    networks:
+      - callisto
 
   # person-restapi-kafka-setup:
   #   <<: *certificate-creation
   #   command: ["person-restapi"]
-
-  # balance-calculator-kafka-setup:
-  #   <<: *certificate-creation
-  #   command: ["balance-calculator"]
-
 
   # keycloak:
   #   image: "quay.io/ukhomeofficedigital/callisto-auth-keycloak:$KEYCLOAK_TAG"
@@ -321,30 +343,6 @@ services:
   #   healthcheck:
   #     <<: *healthcheck-settings
   #     test: wget --no-verbose --tries=1 --spider http://callisto-person-restapi:9090/swagger-ui/index.html || exit 1
-  #   networks:
-  #     - callisto
-
-  # balance-calculator:
-  #   image: "quay.io/ukhomeofficedigital/callisto-balance-calculator:$BALANCE_CALCULATOR_TAG"
-  #   environment:
-  #     BOOTSTRAP_SERVER: kafka:9093
-  #     ACCRUALS_URL: http://callisto-accruals-restapi:9090
-  #     KEYSTORE_LOCATION: file://keystore/balance-calculator/balance-calculator.keystore.jks
-  #     KEYSTORE_PASSWORD: changeit
-  #     SPRING_APPLICATION_JSON: '{
-  #       "spring.kafka.ssl.trust-store-location": "file://keystore/balance-calculator/balance-calculator.truststore.jks",
-  #       "spring.kafka.ssl.trust-store-password": "changeit"
-  #     }'
-  #   ports:
-  #     - "50500:9090"
-  #   depends_on:
-  #     balance-calculator-kafka-setup:
-  #       condition: service_completed_successfully
-  #   volumes:
-  #     - keystore:/keystore
-  #   healthcheck:
-  #     <<: *healthcheck-settings
-  #     test: wget --no-verbose --tries=1 --spider http://balance-calculator:9090/actuator/health || exit 1
   #   networks:
   #     - callisto
 
