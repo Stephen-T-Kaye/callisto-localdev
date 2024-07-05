@@ -276,22 +276,6 @@ services:
   #   <<: *certificate-creation
   #   command: ["person-restapi"]
 
-  # keycloak:
-  #   image: "quay.io/ukhomeofficedigital/callisto-auth-keycloak:$KEYCLOAK_TAG"
-  #   pull_policy: ${PULL_POLICY}
-  #   environment:
-  #     - DB_VENDOR=h2
-  #     - PROXY_ADDRESS_FORWARDING=true
-  #   healthcheck:
-  #     <<: *healthcheck-settings
-  #     test: ["CMD", "curl", "-f", "http://keycloak:9090/auth"]
-  #   command:
-  #     - "-Djboss.http.port=9090"
-  #   ports:
-  #     - "50000:9090"
-  #   networks:
-  #     - callisto
-
   # web:
   #   image: "quay.io/ukhomeofficedigital/callisto-ui:$WEB_TAG"
   #   pull_policy: ${PULL_POLICY}
@@ -345,6 +329,22 @@ services:
   #     test: wget --no-verbose --tries=1 --spider http://callisto-person-restapi:9090/swagger-ui/index.html || exit 1
   #   networks:
   #     - callisto
+
+  keycloak:
+    image: "ghcr.io/stephen-t-kaye/callisto-auth-keycloak:$KEYCLOAK_TAG"
+    pull_policy: ${PULL_POLICY}
+    environment:
+      - DB_VENDOR=h2
+      - PROXY_ADDRESS_FORWARDING=true
+    healthcheck:
+      <<: *healthcheck-settings
+      test: ["CMD", "curl", "-f", "http://keycloak:9090/auth"]
+    command:
+      - "-Djboss.http.port=9090"
+    ports:
+      - "60000:9090"
+    networks:
+      - callisto
 
 networks:
   callisto:
