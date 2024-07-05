@@ -272,23 +272,23 @@ services:
     networks:
       - callisto
 
+  web:
+    image: "ghcr.io/stephen-t-kaye/callisto-ui:$WEB_TAG"
+    pull_policy: ${PULL_POLICY}
+    ports:
+      - "60001:9090"
+    networks:
+      - callisto
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-settings
+      test: ["CMD", "curl", "-f", "http://web:9090/index.html"]
+
   # person-restapi-kafka-setup:
   #   <<: *certificate-creation
   #   command: ["person-restapi"]
-
-  # web:
-  #   image: "quay.io/ukhomeofficedigital/callisto-ui:$WEB_TAG"
-  #   pull_policy: ${PULL_POLICY}
-  #   ports:
-  #     - "50001:9090"
-  #   networks:
-  #     - callisto
-  #   depends_on:
-  #     keycloak:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     <<: *healthcheck-settings
-  #     test: ["CMD", "curl", "-f", "http://web:9090/index.html"]
 
   # person-schema-creation:
   #   <<: *db-schema-creation
