@@ -125,33 +125,6 @@ services:
     networks:
       - callisto
 
-  # kafka-producer-setup:
-  #   <<: *certificate-creation
-  #   command: ["kafka-producer"]
-
-  # kafka-consumer-setup:
-  #   <<: *certificate-creation
-  #   command: ["kafka-consumer"]
-
-  # kafka-tester:
-  #   image: confluentinc/cp-kafka:7.3.1
-  #   volumes:
-  #     - keystore:/etc/kafka/secrets/keystore
-  #     - ./kafka/kafka-producer.properties:/tmp/kafka-producer.properties
-  #     - ./kafka/kafka-consumer.properties:/tmp/kafka-consumer.properties
-  #   entrypoint: ["sleep", "1h"]
-  #   depends_on:
-  #     kafka:
-  #       condition: service_healthy
-  #     kafka-producer-setup:
-  #       condition: service_completed_successfully
-  #     kafka-consumer-setup:
-  #       condition: service_completed_successfully
-  #     kafka-topics-acls:
-  #       condition: service_completed_successfully
-  #   networks:
-  #     - callisto
-
   ingress:
     image: nginx:1.19.2-alpine
     ports:
@@ -285,50 +258,6 @@ services:
     healthcheck:
       <<: *healthcheck-settings
       test: ["CMD", "curl", "-f", "http://web:9090/index.html"]
-
-  # person-restapi-kafka-setup:
-  #   <<: *certificate-creation
-  #   command: ["person-restapi"]
-
-  # person-schema-creation:
-  #   <<: *db-schema-creation
-  #   command: ["person"]
-
-  # person-database-migrations:
-  #   <<: *liquibase-setting
-  #   image: "quay.io/ukhomeofficedigital/callisto-person-database:$PERSON_RESTAPI_TAG"
-  #   environment:
-  #     <<: *db-env
-  #   command: ["person"]
-  #   depends_on:
-  #     person-schema-creation:
-  #       condition: service_completed_successfully
-
-  # callisto-person-restapi:
-  #   image: "quay.io/ukhomeofficedigital/callisto-person-restapi:$PERSON_RESTAPI_TAG"
-  #   environment:
-  #     <<: *db-env
-  #     BOOTSTRAP_SERVER: kafka:9093
-  #     KEYSTORE_LOCATION: file://keystore/person-restapi/person-restapi.keystore.jks
-  #     KEYSTORE_PASSWORD: changeit
-  #     SPRING_APPLICATION_JSON: '{
-  #       "spring.kafka.ssl.trust-store-location": "file://keystore/person-restapi/person-restapi.truststore.jks",
-  #       "spring.kafka.ssl.trust-store-password": "changeit"
-  #     }'
-  #   ports:
-  #     - "50300:9090"
-  #   depends_on:
-  #     person-database-migrations:
-  #       condition: service_completed_successfully
-  #     person-restapi-kafka-setup:
-  #       condition: service_completed_successfully
-  #   volumes:
-  #     - keystore:/keystore
-  #   healthcheck:
-  #     <<: *healthcheck-settings
-  #     test: wget --no-verbose --tries=1 --spider http://callisto-person-restapi:9090/swagger-ui/index.html || exit 1
-  #   networks:
-  #     - callisto
 
   keycloak:
     image: "ghcr.io/stephen-t-kaye/callisto-auth-keycloak:$KEYCLOAK_TAG"
