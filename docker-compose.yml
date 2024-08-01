@@ -59,9 +59,10 @@ services:
       - callisto
     healthcheck:
       test: ["CMD", "psql", "-U", "${PSQL_USER}", "-d", "${DATABASE_NAME}"]
-      interval: 500ms
-      timeout: 1s
-      retries: 5
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   kafka-setup:
     <<: *certificate-creation
@@ -171,7 +172,7 @@ services:
         "spring.kafka.ssl.trust-store-password": "changeit"
         }'
     ports:
-      - "60100:9090"
+      - "9090"
     depends_on:
       timecard-database-migrations:
         condition: service_completed_successfully
@@ -207,7 +208,7 @@ services:
     command:
       - "--server.port=9090" # Having to override server port as application.properties is setting it to a different port
     ports:
-      - "60200:9090"
+      - "9090"
     depends_on:
       accruals-database-migrations:
         condition: service_completed_successfully
@@ -233,10 +234,12 @@ services:
         "spring.kafka.ssl.trust-store-password": "changeit"
         }'
     ports:
-      - "60410:9090"
+      - "9090"
     depends_on:
       balance-calculator-kafka-setup:
         condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
     volumes:
       - keystore:/keystore
     healthcheck:
@@ -249,7 +252,7 @@ services:
     image: "ghcr.io/stephen-t-kaye/callisto-ui:$WEB_TAG"
     pull_policy: ${PULL_POLICY}
     ports:
-      - "60001:9090"
+      - "9090"
     networks:
       - callisto
     depends_on:
@@ -271,7 +274,7 @@ services:
     command:
       - "-Djboss.http.port=9090"
     ports:
-      - "60000:9090"
+      - "9090"
     networks:
       - callisto
 
