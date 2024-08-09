@@ -14,7 +14,7 @@ x-db-env-conf: &db-env
   DATABASE_PORT: 5432
 
 x-db-schema-creation: &db-schema-creation
-  image: quay.io/ukhomeofficedigital/postgres:latest
+  image: postgres:13.1
   volumes:
     - ./sql:/sql
   environment:
@@ -59,9 +59,10 @@ services:
       - callisto
     healthcheck:
       test: ["CMD", "psql", "-U", "${PSQL_USER}", "-d", "${DATABASE_NAME}"]
-      interval: 500ms
-      timeout: 1s
-      retries: 5
+      interval: 2s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   kafka-setup:
     <<: *certificate-creation
@@ -125,33 +126,6 @@ services:
     networks:
       - callisto
 
-  kafka-producer-setup:
-    <<: *certificate-creation
-    command: ["kafka-producer"]
-
-  kafka-consumer-setup:
-    <<: *certificate-creation
-    command: ["kafka-consumer"]
-
-  kafka-tester:
-    image: confluentinc/cp-kafka:7.3.1
-    volumes:
-      - keystore:/etc/kafka/secrets/keystore
-      - ./kafka/kafka-producer.properties:/tmp/kafka-producer.properties
-      - ./kafka/kafka-consumer.properties:/tmp/kafka-consumer.properties
-    entrypoint: ["sleep", "1h"]
-    depends_on:
-      kafka:
-        condition: service_healthy
-      kafka-producer-setup:
-        condition: service_completed_successfully
-      kafka-consumer-setup:
-        condition: service_completed_successfully
-      kafka-topics-acls:
-        condition: service_completed_successfully
-    networks:
-      - callisto
-
   ingress:
     image: nginx:1.19.2-alpine
     ports:
@@ -167,8 +141,129 @@ services:
       <<: *healthcheck-settings
       test: "nc -z ingress 443 || exit -1"
 
+  timecard-schema-creation:
+    <<: *db-schema-creation
+    command: ["timecard"]
+
+  timecard-database-migrations:
+    <<: *liquibase-setting
+    image: "ghcr.io/stephen-t-kaye/callisto-timecard-database:$TIMECARD_RESTAPI_TAG"
+    environment:
+      <<: *db-env
+    command: ["timecard"]
+    depends_on:
+      timecard-schema-creation:
+        condition: service_completed_successfully
+
+  timecard-restapi-kafka-setup:
+    <<: *certificate-creation
+    command: ["timecard-restapi"]
+
+  timecard-restapi:
+    image: "ghcr.io/stephen-t-kaye/callisto-timecard-application:$TIMECARD_RESTAPI_TAG"
+    pull_policy: ${PULL_POLICY}
+    environment:
+      <<: *db-env
+      BOOTSTRAP_SERVER: kafka:9093
+      KEYSTORE_LOCATION: file://keystore/timecard-restapi/timecard-restapi.keystore.jks
+      TIMECARD_KEYSTORE_PASSWORD: changeit
+      SPRING_APPLICATION_JSON: '{
+        "spring.kafka.ssl.trust-store-location": "file://keystore/timecard-restapi/timecard-restapi.truststore.jks",
+        "spring.kafka.ssl.trust-store-password": "changeit"
+        }'
+    ports:
+      - "9090"
+    depends_on:
+      timecard-database-migrations:
+        condition: service_completed_successfully
+      timecard-restapi-kafka-setup:
+        condition: service_completed_successfully
+    volumes:
+      - keystore:/keystore
+    healthcheck:
+      <<: *healthcheck-settings
+      test: wget --no-verbose --tries=1 --spider http://timecard-restapi:9090/swagger-ui/index.html || exit 1
+    networks:
+      - callisto
+
+  accruals-schema-creation:
+    <<: *db-schema-creation
+    command: ["accruals"]
+
+  accruals-database-migrations:
+    <<: *liquibase-setting
+    image: "ghcr.io/stephen-t-kaye/callisto-accruals-database:$ACCRUALS_RESTAPI_TAG"
+    environment:
+      <<: *db-env
+    command: ["accruals"]
+    depends_on:
+      accruals-schema-creation:
+        condition: service_completed_successfully
+
+  accruals-restapi:
+    image: "ghcr.io/stephen-t-kaye/callisto-accruals-application:$ACCRUALS_RESTAPI_TAG"
+    pull_policy: ${PULL_POLICY}
+    environment:
+      <<: *db-env
+    command:
+      - "--server.port=9090" # Having to override server port as application.properties is setting it to a different port
+    ports:
+      - "9090"
+    depends_on:
+      accruals-database-migrations:
+        condition: service_completed_successfully
+    healthcheck:
+      <<: *healthcheck-settings
+      test: wget --no-verbose --tries=1 --spider http://accruals-restapi:9090/swagger-ui/index.html || exit 1
+    networks:
+      - callisto
+
+  balance-calculator-kafka-setup:
+    <<: *certificate-creation
+    command: ["balance-calculator"]
+
+  balance-calculator:
+    image: "ghcr.io/stephen-t-kaye/callisto-balance-calculator-application:$BALANCE_CALCULATOR_TAG"
+    environment:
+      BOOTSTRAP_SERVER: kafka:9093
+      KEYSTORE_LOCATION: file://keystore/balance-calculator/balance-calculator.keystore.jks
+      KEYSTORE_PASSWORD: changeit
+      ACCRUALS_URL: http://accruals-restapi:9090
+      SPRING_APPLICATION_JSON: '{
+        "spring.kafka.ssl.trust-store-location": "file://keystore/balance-calculator/balance-calculator.truststore.jks",
+        "spring.kafka.ssl.trust-store-password": "changeit"
+        }'
+    ports:
+      - "9090"
+    depends_on:
+      balance-calculator-kafka-setup:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+    volumes:
+      - keystore:/keystore
+    healthcheck:
+      <<: *healthcheck-settings
+      test: wget --no-verbose --tries=1 --spider http://balance-calculator:9090/actuator/health || exit 1
+    networks:
+      - callisto
+
+  web:
+    image: "ghcr.io/stephen-t-kaye/callisto-ui:$WEB_TAG"
+    pull_policy: ${PULL_POLICY}
+    ports:
+      - "9090"
+    networks:
+      - callisto
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-settings
+      test: ["CMD", "curl", "-f", "http://web:9090/index.html"]
+
   keycloak:
-    image: "quay.io/ukhomeofficedigital/callisto-auth-keycloak:$KEYCLOAK_TAG"
+    image: "ghcr.io/stephen-t-kaye/callisto-auth-keycloak:$KEYCLOAK_TAG"
     pull_policy: ${PULL_POLICY}
     environment:
       - DB_VENDOR=h2
@@ -179,168 +274,7 @@ services:
     command:
       - "-Djboss.http.port=9090"
     ports:
-      - "50000:9090"
-    networks:
-      - callisto
-
-  web:
-    image: "quay.io/ukhomeofficedigital/callisto-ui:$WEB_TAG"
-    pull_policy: ${PULL_POLICY}
-    ports:
-      - "50001:9090"
-    networks:
-      - callisto
-    depends_on:
-      keycloak:
-        condition: service_healthy
-    healthcheck:
-      <<: *healthcheck-settings
-      test: ["CMD", "curl", "-f", "http://web:9090/index.html"]
-
-  timecard-schema-creation:
-    <<: *db-schema-creation
-    command: ["timecard"]
-
-  timecard-database-migrations:
-    <<: *liquibase-setting
-    image: "quay.io/ukhomeofficedigital/callisto-timecard-database:$TIMECARD_RESTAPI_TAG"
-    environment:
-      <<: *db-env
-    command: ["timecard"]
-    depends_on:
-      timecard-schema-creation:
-        condition: service_completed_successfully
-
-  accruals-schema-creation:
-    <<: *db-schema-creation
-    command: ["accruals"]
-
-  accruals-database-migrations:
-    <<: *liquibase-setting
-    image: "quay.io/ukhomeofficedigital/callisto-accruals-database:$ACCRUALS_RESTAPI_TAG"
-    environment:
-      <<: *db-env
-    command: ["accruals"]
-    depends_on:
-      accruals-schema-creation:
-        condition: service_completed_successfully
-
-  person-schema-creation:
-    <<: *db-schema-creation
-    command: ["person"]
-
-  person-database-migrations:
-    <<: *liquibase-setting
-    image: "quay.io/ukhomeofficedigital/callisto-person-database:$PERSON_RESTAPI_TAG"
-    environment:
-      <<: *db-env
-    command: ["person"]
-    depends_on:
-      person-schema-creation:
-        condition: service_completed_successfully
-
-  timecard-restapi-kafka-setup:
-    <<: *certificate-creation
-    command: ["timecard-restapi"]
-
-  person-restapi-kafka-setup:
-    <<: *certificate-creation
-    command: ["person-restapi"]
-
-  balance-calculator-kafka-setup:
-    <<: *certificate-creation
-    command: ["balance-calculator"]
-
-  callisto-timecard-restapi:
-    image: "quay.io/ukhomeofficedigital/callisto-timecard-restapi:$TIMECARD_RESTAPI_TAG"
-    environment:
-      <<: *db-env
-      BOOTSTRAP_SERVER: kafka:9093
-      KEYSTORE_LOCATION: file://keystore/timecard-restapi/timecard-restapi.keystore.jks
-      TIMECARD_KEYSTORE_PASSWORD: changeit
-      SPRING_APPLICATION_JSON: '{
-        "spring.kafka.ssl.trust-store-location": "file://keystore/timecard-restapi/timecard-restapi.truststore.jks",
-        "spring.kafka.ssl.trust-store-password": "changeit"
-      }'
-    ports:
-      - "50100:9090"
-    depends_on:
-      timecard-database-migrations:
-        condition: service_completed_successfully
-      timecard-restapi-kafka-setup:
-        condition: service_completed_successfully
-    volumes:
-      - keystore:/keystore
-    healthcheck:
-      <<: *healthcheck-settings
-      test: wget --no-verbose --tries=1 --spider http://callisto-timecard-restapi:9090/swagger-ui/index.html || exit 1
-    networks:
-      - callisto
-
-  callisto-accruals-restapi:
-    image: "quay.io/ukhomeofficedigital/callisto-accruals-restapi:$ACCRUALS_RESTAPI_TAG"
-    environment:
-      <<: *db-env
-    command:
-      - "--server.port=9090" # Having to override server port as application.properties is setting it to a different port
-    ports:
-      - "50200:9090"
-    depends_on:
-      accruals-database-migrations:
-        condition: service_completed_successfully
-    healthcheck:
-      <<: *healthcheck-settings
-      test: wget --no-verbose --tries=1 --spider http://callisto-accruals-restapi:9090/swagger-ui/index.html || exit 1
-    networks:
-      - callisto
-
-  callisto-person-restapi:
-    image: "quay.io/ukhomeofficedigital/callisto-person-restapi:$PERSON_RESTAPI_TAG"
-    environment:
-      <<: *db-env
-      BOOTSTRAP_SERVER: kafka:9093
-      KEYSTORE_LOCATION: file://keystore/person-restapi/person-restapi.keystore.jks
-      KEYSTORE_PASSWORD: changeit
-      SPRING_APPLICATION_JSON: '{
-        "spring.kafka.ssl.trust-store-location": "file://keystore/person-restapi/person-restapi.truststore.jks",
-        "spring.kafka.ssl.trust-store-password": "changeit"
-      }'
-    ports:
-      - "50300:9090"
-    depends_on:
-      person-database-migrations:
-        condition: service_completed_successfully
-      person-restapi-kafka-setup:
-        condition: service_completed_successfully
-    volumes:
-      - keystore:/keystore
-    healthcheck:
-      <<: *healthcheck-settings
-      test: wget --no-verbose --tries=1 --spider http://callisto-person-restapi:9090/swagger-ui/index.html || exit 1
-    networks:
-      - callisto
-
-  balance-calculator:
-    image: "quay.io/ukhomeofficedigital/callisto-balance-calculator:$BALANCE_CALCULATOR_TAG"
-    environment:
-      BOOTSTRAP_SERVER: kafka:9093
-      ACCRUALS_URL: http://callisto-accruals-restapi:9090
-      KEYSTORE_LOCATION: file://keystore/balance-calculator/balance-calculator.keystore.jks
-      KEYSTORE_PASSWORD: changeit
-      SPRING_APPLICATION_JSON: '{
-        "spring.kafka.ssl.trust-store-location": "file://keystore/balance-calculator/balance-calculator.truststore.jks",
-        "spring.kafka.ssl.trust-store-password": "changeit"
-      }'
-    ports:
-      - "50500:9090"
-    depends_on:
-      balance-calculator-kafka-setup:
-        condition: service_completed_successfully
-    volumes:
-      - keystore:/keystore
-    healthcheck:
-      <<: *healthcheck-settings
-      test: wget --no-verbose --tries=1 --spider http://balance-calculator:9090/actuator/health || exit 1
+      - "9090"
     networks:
       - callisto
 
